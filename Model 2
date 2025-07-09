@@ -1,0 +1,47 @@
+alpha = 1.0   # OccupancyRate weight
+beta = 0.5    # QueueLength weight
+gamma = 0.8   # Traffic level penalty
+delta = 1.0   # Special day boost
+epsilon = 0.6 # Vehicle type weight
+lambda_ = 0.5 # Final scaling of demand impact on price
+
+traffic_map = {"low": 1, "medium": 2, "high": 3}
+vehicle_map = {"bike": 1, "car": 2, "truck": 3}
+
+df['TrafficLevel'] = df['TrafficConditionNearby'].map(traffic_map)
+df['VehicleTypeWeight'] = df['VehicleType'].map(vehicle_map)
+
+df['DemandScore'] = (
+    alpha * df['OccupancyRate'] +
+    beta * df['QueueLength'] -
+    gamma * df['TrafficLevel'] +
+    delta * df['IsSpecialDay'] +
+    epsilon * df['VehicleTypeWeight']
+)
+
+df['DemandScoreNorm'] = df.groupby('SystemCodeNumber')['DemandScore'].transform(
+    lambda x: (x - x.mean()) / (x.std() + 1e-6)
+)
+
+base_price = 10.0
+df['DemandPrice'] = base_price * (1 + lambda_ * df['DemandScoreNorm'])
+
+df['DemandPrice'] = df['DemandPrice'].clip(lower=base_price * 0.5, upper=base_price * 2.0)
+
+import matplotlib.pyplot as plt
+import matplotlib.dates as mdates
+
+sample_lot = df['SystemCodeNumber'].unique()[0]
+plot_df = df[df['SystemCodeNumber'] == sample_lot]
+
+plt.figure(figsize=(12, 5))
+plt.plot(plot_df['Timestamp'], plot_df['DemandPrice'], label='Demand-Based Price', color='orange')
+plt.title(f'Demand-Based Price Trend – Lot: {sample_lot}')
+plt.xlabel("Time")
+plt.ylabel("Price ($)")
+plt.xticks(rotation=45)
+plt.gca().xaxis.set_major_formatter(mdates.DateFormatter('%m-%d %H:%M'))
+plt.grid(True)
+plt.legend()
+plt.tight_layout()
+plt.show()
