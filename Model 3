@@ -1,0 +1,55 @@
+from math import radians, sin, cos, sqrt, atan2
+import numpy as np
+
+# Haversine function
+def haversine(lat1, lon1, lat2, lon2):
+    R = 6371
+    dlat, dlon = radians(lat2 - lat1), radians(lon2 - lon1)
+    a = sin(dlat/2)**2 + cos(radians(lat1)) * cos(radians(lat2)) * sin(dlon/2)**2
+    return R * 2 * atan2(sqrt(a), sqrt(1 - a))
+
+# Find nearby lots within 2km
+lots = df[['SystemCodeNumber', 'Latitude', 'Longitude']].drop_duplicates()
+neighbors = {
+    lot['SystemCodeNumber']: [
+        comp['SystemCodeNumber']
+        for _, comp in lots.iterrows()
+        if lot['SystemCodeNumber'] != comp['SystemCodeNumber'] and
+        haversine(lot['Latitude'], lot['Longitude'], comp['Latitude'], comp['Longitude']) <= 2
+    ]
+    for _, lot in lots.iterrows()
+}
+
+# Competitive pricing logic
+df['CompetitivePrice'], df['RerouteSuggestion'] = df['DemandPrice'], 0
+
+for lot in df['SystemCodeNumber'].unique():
+    for i, row in df[df['SystemCodeNumber'] == lot].iterrows():
+        t, occ, dp = row['Timestamp'], row['OccupancyRate'], row['DemandPrice']
+        comps = [df[(df['SystemCodeNumber'] == n) & (df['Timestamp'] == t)]['DemandPrice'].values[0]
+                 for n in neighbors[lot]
+                 if not df[(df['SystemCodeNumber'] == n) & (df['Timestamp'] == t)].empty]
+        avg = np.mean(comps) if comps else dp
+
+        if occ > 0.9 and dp > avg:
+            df.at[i, 'CompetitivePrice'] = max(dp * 0.9, base_price * 0.5)
+            df.at[i, 'RerouteSuggestion'] = 1
+        elif avg < dp:
+            df.at[i, 'CompetitivePrice'] = min(dp * 1.05, base_price * 2)
+
+# Plot
+lot = df['SystemCodeNumber'].unique()[0]
+plot_df = df[df['SystemCodeNumber'] == lot]
+
+plt.figure(figsize=(12, 5))
+plt.plot(plot_df['Timestamp'], plot_df['DemandPrice'], '--', label='Demand Price')
+plt.plot(plot_df['Timestamp'], plot_df['CompetitivePrice'], label='Competitive Price', color='green')
+plt.title(f'Competitive Price Trend – Lot: {lot}')
+plt.xlabel("Time"), plt.ylabel("Price ($)")
+plt.xticks(rotation=45)
+plt.gca().xaxis.set_major_formatter(mdates.DateFormatter('%m-%d %H:%M'))
+plt.legend(), plt.grid(True), plt.tight_layout()
+plt.show()
+
+# Optional: Check reroutes
+plot_df[plot_df['RerouteSuggestion'] == 1][['Timestamp', 'OccupancyRate', 'CompetitivePrice']]
